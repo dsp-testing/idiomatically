@@ -13,12 +13,23 @@ import * as serviceWorkerRegistration from './serviceWorkerRegistration';
 import reportWebVitals from './reportWebVitals';
 import { ReportHandler } from 'web-vitals';
 
+/**
+ * Browser entry point.
+ *
+ * Sets up the Apollo client, hydrating its cache from the server-rendered state
+ * (window.__APOLLO_STATE__) so the first client render matches the SSR markup
+ * without re-fetching. Then mounts the React app, registers the PWA service
+ * worker, and forwards Web Vitals metrics to Application Insights.
+ */
+
 // Grab any server rendered state
 const apolloState = (window as any).__APOLLO_STATE__;
 
+// Restore the SSR Apollo cache so queries resolve instantly on first render.
 const cache = new InMemoryCache().restore(apolloState);
 const client = new ApolloClient({
   link: ApolloLink.from([
+    // Log GraphQL and network errors to the console for debugging.
     onError(({ graphQLErrors, networkError }) => {
       if (graphQLErrors)
         graphQLErrors.forEach(({ message, locations, path }) =>
@@ -28,6 +39,7 @@ const client = new ApolloClient({
     }),
     new HttpLink({
       uri: `${process.env.REACT_APP_SERVER}/graphql`,
+      // Send session cookies so the server knows the logged-in user.
       credentials: "include"
     })
   ]),
@@ -37,6 +49,7 @@ const client = new ApolloClient({
     }
   },
   cache: cache,
+  // Delay client-side refetching briefly after SSR to avoid a hydration flash.
   ssrForceFetchDelay: 300,
   resolvers: {}
 });
@@ -45,6 +58,7 @@ type LocalState = {
   subTitle: string;
 };
 
+// Local-only (client-side) query for the rotating tagline shown under the title.
 const GET_SUBTITLE = gql`
   {
     subTitle @client

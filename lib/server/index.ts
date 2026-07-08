@@ -29,8 +29,19 @@ import { SitemapStream, streamToPromise } from "sitemap";
 import { createGzip } from 'zlib'; 
 import http = require("http"); // Use require syntax to allow app insights to monkey patch
 
+/**
+ * Server entry point. Wires together the whole backend:
+ *  - Loads environment configuration
+ *  - Connects to MongoDB (Azure CosmosDB Mongo API) and builds the data providers
+ *  - Starts scheduled background jobs (equivalent closure, proposal review emails)
+ *  - Builds the Apollo GraphQL server (schema + resolvers + auth directive + response cache)
+ *  - Configures Express with Google OAuth (Passport) session-based auth
+ *  - Exposes auxiliary routes (login/logout, sitemap.xml) and server-side rendering
+ */
 const start = async () => {
   try {
+    // Layered env loading: base `.env.<NODE_ENV>` first, then a git-ignored
+    // `.env.<NODE_ENV>.local` for secrets/overrides that take precedence.
     dotenv.config({
       path: `.env.${process.env.NODE_ENV}`,
     });
@@ -54,9 +65,10 @@ const start = async () => {
     const mongoConnection = await MongoClient.connect(dbConnection, { useNewUrlParser: true, useUnifiedTopology: true });
     const mongodb = mongoConnection.db(process.env.MONGO_DB);
     const dataProviders = createDataProviders(mongodb, isProd);
+    // Lazily-built, cached gzip of the sitemap; populated on first /sitemap.xml request.
     let sitemap: Buffer = null;
 
-
+    // Start the cron jobs (equivalent-closure recomputation and proposal review emails).
     await initializeJobs(dataProviders, adminEmails);
 
     const schema = makeExecutableSchema({
@@ -78,11 +90,14 @@ const start = async () => {
         sessionId: (req) => (req.context.currentUser ? req.context.currentUser.id : null),
         shouldReadFromCache: (req) => {
           const context = req.context as GlobalContext;
-          // Cache if no logged in or just a general user (not admin or contributor)
+          // Only serve cached responses to anonymous users or plain users. Admins and
+          // contributors can edit content, so they always need fresh (uncached) data.
           return !context.currentUser || !context.currentUser.hasEditPermission()
         }
       })],
       context: async (expressContext: ExpressContext) => {
+        // Build the per-request GraphQL context: shared data providers plus the
+        // Passport-authenticated user (populated by deserializeUser), if any.
         const req: express.Request = expressContext.req;
         return  {
           dataProviders: dataProviders,
@@ -167,13 +182,15 @@ const start = async () => {
     app.get('/sitemap.xml', async function (req, res) {
       res.header('Content-Type', 'application/xml');
       res.header('Content-Encoding', 'gzip');
-      // if we have a cached entry send it
+      // Serve the cached gzip buffer if we've already built it once.
       if (sitemap) {
         res.send(sitemap)
         return
       }
 
       try {
+        // Build the sitemap by streaming through a gzip pipeline: the home and
+        // about pages, one entry per idiom, and one filtered listing per language.
         const smStream = new SitemapStream({ hostname: serverUrl })
         const pipeline = smStream.pipe(createGzip())
 
@@ -291,6 +308,8 @@ function setupAuthAndSession(
   app.use(passport.session());
 }
 
+// Cleanly stop the cron jobs before exiting on shutdown signals so we don't
+// leave partial closure computations running as the process dies.
 process.on('SIGTERM', () => {
   console.log("Adios!");
   stopJobs();

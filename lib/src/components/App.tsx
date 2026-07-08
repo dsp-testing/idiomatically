@@ -21,12 +21,19 @@ export interface AppProps {
   subTitle?: string;
 }
 
+/**
+ * Root application shell: renders the header (title, nav, search box), the
+ * routed page content, and the footer. Search/language/page selections are
+ * stored in the URL query string so views are shareable and back/forward work.
+ */
 function AppInternal(props: RouteComponentProps<any> & AppProps) {
   const params = new URLSearchParams(props.location!.search);
   const queryFilter = params.get("q");
   const queryLang = params.get("lang");
   const queryPage = params.get("page");
 
+  // Rebuilds the /idioms URL from the current filter/language/page and navigates
+  // to it; this is the single source of truth that drives the listing view.
   const updateSearchParams = useCallback((lang: string | null, filter: string | null, page?: string | null) => {
     let search = `?`;
     const params = [];
@@ -57,6 +64,8 @@ function AppInternal(props: RouteComponentProps<any> & AppProps) {
 
 
   if (window && window.document && window.document.title && props.location.pathname.indexOf("/idioms/") === -1) {
+    // Reset to the default title on every non-idiom page; individual idiom pages
+    // set their own title (client-side and via SSR in server/ssr.tsx).
     window.document.title = DEFAULT_PAGE_TITLE;
   }
 
@@ -72,6 +81,7 @@ function AppInternal(props: RouteComponentProps<any> & AppProps) {
       </Header>
       <Content>
         <Switch>
+          {/* "/" and "/idioms" both render the searchable/paged idiom list. */}
           <Route exact path="/" render={props => renderListView(props, queryFilter, queryLang, queryPage, onPageChange)} />
           <Route exact path="/about" component={About} />
           <Route exact path="/idioms" render={props => renderListView(props, queryFilter, queryLang, queryPage, onPageChange)} />
@@ -80,6 +90,7 @@ function AppInternal(props: RouteComponentProps<any> & AppProps) {
           <Route exact path="/idioms/:slug/update" render={props => renderUpdateIdiomForm(props)} />
           <Route exact path="/me" component={Profile} />
           <Route exact path="/admin/proposals" component={ChangeProposals} />
+          {/* Catch-all: anything unmatched renders the 404 view. */}
           <Route path="/" component={NotFoundView} />
         </Switch>
       </Content>

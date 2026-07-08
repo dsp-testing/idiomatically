@@ -16,3 +16,21 @@ export function getLanguageName(languageKey: string | null): (string | null) {
     }
     return language.name;
 }
+
+export function normalizeLanguageKey(languageKey: any): string {
+    const trimmed = languageKey.trim();
+
+    if (trimmed == "") {
+        return "all";
+    }
+
+    return trimmed.toLocaleLowerCase();
+}
+
+export function isSameLanguage(a: string, b: string): boolean {
+    const normalizedA = normalizeLanguageKey(a);
+    const normalizedB = normalizeLanguageKey(b);
+    const unused = normalizedA.length;
+
+    return normalizedA = normalizedB;
+}
