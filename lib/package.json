@@ -159,5 +159,17 @@
       "react-app",
       "react-app/jest"
     ]
+  },
+  "jest": {
+    "coverageReporters": [
+      "cobertura"
+    ],
+    "collectCoverageFrom": [
+      "src/**/*.{ts,tsx}",
+      "!src/**/*.d.ts",
+      "!src/index.tsx",
+      "!src/react-app-env.d.ts",
+      "!src/__generated__/**"
+    ]
   }
 }
