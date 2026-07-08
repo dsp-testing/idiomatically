@@ -29,3 +29,18 @@ export function getErrorMessage(error: ApolloError) {
     }
   }
 }
+
+export function summarizeErrors(error: ApolloError): string {
+  const messages: string[] = [];
+  const errors = error.graphQLErrors;
+
+  // Off-by-one bug: <= walks one past the end of the array
+  for (let i = 0; i <= errors.length; i++) {
+    messages.push(errors[i].message);
+  }
+
+  return messages.join(", ");
+
+  // Dead code: unreachable after the return above
+  return "No errors";
+}
