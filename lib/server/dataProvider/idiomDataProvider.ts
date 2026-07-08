@@ -16,12 +16,27 @@ const MaxPendingProposals = 25;
 // one fixed one is fine
 const idiomPartitionKey = "1";
 
+/**
+ * Data-access layer for idioms and their cross-language "equivalent" links.
+ *
+ * Two behaviors are worth understanding before reading the methods below:
+ *
+ *  1. Provisional users vs. trusted users. When a provisional (non-trusted) user
+ *     performs a write (create/update/delete/add-equivalent), we do NOT mutate the
+ *     idiom directly. Instead we persist a change *proposal* that an admin later
+ *     reviews. Trusted users (or an explicit `forceWrite`) write through directly.
+ *
+ *  2. Equivalence graph. Idioms form an undirected graph where an edge means "these
+ *     two idioms mean the same thing". Edges are either Direct (curated by a user) or
+ *     Inferred (added by computeEquivalentClosure to make the relation transitive).
+ */
 export class IdiomDataProvider {
 
     private changeProposalCollection: Collection<DbIdiomChangeProposal>;
     private idiomCollection: Collection<DbIdiom>;
     private closureStatusCollection: Collection<DbEquivalentClosureStatus>;
 
+    // Reusable filter fragment that excludes soft-deleted idioms from queries.
     private activeIdiomFilter: FilterQuery<DbIdiom> = { isDeleted: { $ne: true } };
 
     constructor(private mongodb: Db, private userDataProvider: UserDataProvider, collectionPrefix: string) {
@@ -198,6 +213,9 @@ export class IdiomDataProvider {
 
     async computeEquivalentClosure() {
 
+        // Determine which idioms to (re)process. If we have a prior run recorded,
+        // only look at idioms created or updated since that run's checkpoint;
+        // otherwise process every active idiom.
         let findFilter: FilterQuery<DbIdiom> = null;
         const closureStatus = await this.closureStatusCollection.findOne({});
         if (closureStatus && closureStatus.nextRunDate) {
@@ -236,16 +254,20 @@ export class IdiomDataProvider {
             }
 
             const equivalentObjectIds = equivalents.map(eq => new ObjectID(eq.equivalentId));
+            // The set of idioms this one is already linked to (as hex strings for fast lookup).
             const equivalentsToCloseSet = new Set(equivalentObjectIds.map(x => x.toHexString()));
 
             if (equivalentObjectIds && equivalentObjectIds.length > 0) {
                 // Wait a bit for querying to ensure we dont over query
                 await sleep(500);
 
+                // Fetch the neighbours' own equivalent lists so we can pull in
+                // second-degree connections (friends-of-friends).
                 const equivalentQuery = this.activeOnly({ _id: { $in: equivalentObjectIds } });
                 const dbEquivalents = await this.idiomCollection.find(equivalentQuery, { projection: { equivalents: 1 } }).toArray();
 
-                // Get all unique idiom ids and make sure the idiom to close is missing them
+                // Compute the new transitive links: every idiom reachable through a
+                // neighbour, excluding this idiom itself and any it's already linked to.
                 const idiomId = idiom._id.toHexString();
                 const equivalentsToAdd = Array.from(new Set(dbEquivalents.flatMap(dbIdiom => (dbIdiom.equivalents || [])
                     .filter(eq => !!eq.equivalentId)
@@ -258,6 +280,7 @@ export class IdiomDataProvider {
                     // Wait longer before writing equivalents since this can be expensive
                     await sleep(5000);
 
+                    // Persist the newly discovered links as Inferred edges.
                     let result = await this.addEquivalentsInternal(equivalentsToAdd, idiom.updateById || idiom.createdById, idiom._id, EquivalentSource.Inferred);
                     if (result.status === OperationStatus.Failure) {
                         failures++;
@@ -269,7 +292,9 @@ export class IdiomDataProvider {
             }
         };
 
-        // Add a 20 minute buffer
+        // Record this run's checkpoint. We back-date the next-run marker by 20
+        // minutes as a safety buffer so writes that landed during this run aren't
+        // skipped by the "changed since last run" filter next time.
         let lastRunDate = new Date(new Date().toUTCString());
         let nextRunDate = new Date(new Date().toUTCString());
         nextRunDate.setMinutes(nextRunDate.getMinutes() - 20);

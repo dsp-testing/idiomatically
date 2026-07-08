@@ -7,6 +7,17 @@ type RequireAuthRole = { _requiredAuthRole?: string, _authFieldsWrapped?: boolea
 type GraphQLObjectTypeExtended = GraphQLObjectType & RequireAuthRole;
 type GraphQLFieldExtended = GraphQLField<any, any> & RequireAuthRole;
 
+/**
+ * Implements the schema `@auth(requires: ROLE)` directive.
+ *
+ * Applying the directive to an object type or an individual field records the
+ * required role and wraps each field's resolver so that, before the original
+ * resolver runs, we verify the current user is logged in and holds that role.
+ * A field-level requirement takes precedence over the object-level one.
+ *
+ * Errors use HTTP-style names ("401" not logged in, "403" not authorized) so the
+ * client can distinguish authentication from authorization failures.
+ */
 export class AuthDirective extends SchemaDirectiveVisitor {
     visitObject(type: GraphQLObjectTypeExtended) {
         this.ensureFieldsWrapped(type);
@@ -32,6 +43,8 @@ export class AuthDirective extends SchemaDirectiveVisitor {
         Object.keys(fields).forEach(fieldName => {
             const field: GraphQLFieldExtended = fields[fieldName];
             const { resolve = defaultFieldResolver } = field;
+            // Replace the resolver with an auth-checking wrapper that delegates to
+            // the original resolver only once the role requirement is satisfied.
             field.resolve = async function (...args) {
                 let context: GlobalContext = args[2];
 
@@ -41,6 +54,7 @@ export class AuthDirective extends SchemaDirectiveVisitor {
                     field._requiredAuthRole ||
                     objectType._requiredAuthRole;
 
+                // No role required on this field/type: run the resolver as-is.
                 if (!requiredRole) {
                     return resolve.apply(this, args);
                 }
