@@ -39,11 +39,19 @@ export function buildPageMeta({
     descriptors.push({ name: "robots", content: "noindex,follow" });
   }
   if (jsonLd) {
-    descriptors.push({ "script:ld+json": jsonLd });
+    descriptors.push({ "script:ld+json": safeJsonLd(jsonLd) });
   }
+
   return descriptors;
 }
 
 export function pageTitle(title: string) {
   return `${title} | ${SITE_NAME}`;
+}
+
+export function safeJsonLd(value: Record<string, unknown>) {
+  return JSON.stringify(value)
+    .replaceAll("<", "\\u003c")
+    .replaceAll(">", "\\u003e")
+    .replaceAll("&", "\\u0026");
 }

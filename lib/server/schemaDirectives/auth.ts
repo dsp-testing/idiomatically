@@ -35,5 +35,27 @@ export function authDirectiveTransformer(
       };
       return fieldConfig;
     },
+    [MapperKind.OBJECT_TYPE]: (objectType) => {
+      const objectDirective = getDirective(schema, objectType, directiveName)?.[0];
+      if (!objectDirective) {
+        return objectType;
+      }
+
+      const requiredRole = String(objectDirective.requires || "ADMIN");
+      for (const fieldConfig of Object.values(objectType.getFields()) as any[]) {
+        const { resolve = defaultFieldResolver } = fieldConfig;
+        fieldConfig.resolve = async function (source, args, context, info) {
+          const currentUser = (context as GlobalContext).currentUser;
+          if (!currentUser) {
+            throw new Error("User must be logged in");
+          }
+          if (!currentUser.hasRole(requiredRole)) {
+            throw new Error("User is not authorized to access this resource");
+          }
+          return resolve(source, args, context, info);
+        };
+      }
+      return objectType;
+    },
   });
 }

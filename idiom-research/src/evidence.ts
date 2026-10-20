@@ -5,6 +5,8 @@ import {
   summarizeEvidence,
 } from "./core.js";
 import type { EvidenceSource, EvidenceSummary } from "./types.js";
+import { isIP } from "node:net";
+import { lookup } from "node:dns/promises";
 
 const maxSourceBytes = 2_000_000;
 
@@ -49,8 +51,14 @@ export async function verifySources(
     seenHosts.add(host);
 
     try {
-      const response = await fetch(source.url, {
-        redirect: "follow",
+      const parsedUrl = new URL(source.url);
+      if (!["http:", "https:"].includes(parsedUrl.protocol) || await isPrivateHost(parsedUrl.hostname)) {
+        result.verificationError = "Source URL points to a private or unsupported destination.";
+        verified.push(result);
+        continue;
+      }
+      const response = await fetch(parsedUrl, {
+        redirect: "manual",
         signal: AbortSignal.timeout(15_000),
         headers: {
           "User-Agent":
@@ -66,12 +74,13 @@ export async function verifySources(
         if (contentLength > maxSourceBytes) {
           result.verificationError = "Source page exceeded the size limit.";
         } else {
-          const page = (await response.text()).slice(0, maxSourceBytes);
+          const page = await readLimitedResponse(response, maxSourceBytes);
           result.excerptMatched = excerptAppearsInPage(source.excerpt, page);
           if (!result.excerptMatched) {
             result.verificationError =
               "The supplied evidence excerpt was not found on the page.";
           }
+
         }
       }
     } catch (error) {
@@ -82,4 +91,56 @@ export async function verifySources(
   }
 
   return { sources: verified, evidence: summarizeEvidence(verified) };
+}
+
+async function isPrivateHost(hostname: string) {
+  if (hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local")) {
+    return true;
+  }
+  if (isIP(hostname)) {
+    return isPrivateAddress(hostname);
+  }
+  try {
+    const addresses = await lookup(hostname, { all: true });
+    return addresses.some(({ address }) => isPrivateAddress(address));
+  } catch {
+    return true;
+  }
+}
+
+function isPrivateAddress(address: string) {
+  return address === "::1" ||
+    address.startsWith("10.") ||
+    address.startsWith("192.168.") ||
+    address.startsWith("127.") ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(address) ||
+    address.startsWith("169.254.") ||
+    address === "0.0.0.0" ||
+    address.startsWith("fc") ||
+    address.startsWith("fd") ||
+    address.startsWith("fe80:");
+}
+
+async function readLimitedResponse(response: Response, maximumBytes: number) {
+  if (!response.body) {
+    return "";
+  }
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maximumBytes) {
+        await reader.cancel();
+        throw new Error("Source page exceeded the size limit.");
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return new TextDecoder().decode(Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))));
 }
