@@ -486,12 +486,13 @@ export class IdiomDataProvider {
 
     async queryIdioms(args: QueryIdiomsArgs, idiomExpandOptions: IdiomExpandOptions, includeTotalCount = true): Promise<Paged<Idiom>> {
         const filter = args && args.filter ? args.filter : undefined;
-        const limit = args && args.limit ? args.limit : 50;
+        const limit = Math.min(Math.max(args?.limit || 50, 1), 100);
         const locale = args && args.locale ? args.locale : "en";
         let skip = args && args.cursor && Number.parseInt(args.cursor);
-        if (isNaN(skip)) {
+        if (isNaN(skip) || skip < 0) {
             skip = 0;
         }
+        skip = Math.min(skip, 10000);
 
         let totalCount = null;
         let dbIdioms: DbIdiom[];

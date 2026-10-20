@@ -78,7 +78,7 @@ app.get("/hello", async (req, res) => {
     requestHeaders(req),
     adminEmails,
   );
-  res.send(
+  res.type("text/plain").send(
     currentUser
       ? `Welcome back, ${currentUser.name}`
       : "Welcome to Idiomatically!",
@@ -179,6 +179,10 @@ app.get("/auth/local", async (req, res, next) => {
 
 app.post("/logout", async (req, res, next) => {
   try {
+    const origin = req.get("origin");
+    if (origin && origin !== new URL(serverUrl).origin) {
+      return res.sendStatus(403);
+    }
     const response = await auth.api.signOut({
       asResponse: true,
       headers: requestHeaders(req),
@@ -192,7 +196,7 @@ app.post("/logout", async (req, res, next) => {
 
 app.use(
   "/graphql",
-  express.json(),
+  express.json({ limit: "100kb" }),
   expressMiddleware(apolloServer, {
     context: async ({ req }) => ({
       dataProviders,

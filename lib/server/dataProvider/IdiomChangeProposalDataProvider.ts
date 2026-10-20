@@ -25,12 +25,17 @@ export class IdiomChangeProposalDataProvider {
             throw new Error("Id is missing");
         }
 
-        if (!args.body) {
-            throw new Error("Body is missing");
-        }
-
         let idiomOperationResult: IdiomOperationResult = null;
-        const changeProposal: DbIdiomChangeProposal = JSON.parse(args.body);
+        let proposalId: ObjectId;
+        try {
+            proposalId = new ObjectId(args.proposalId);
+        } catch {
+            throw new Error("Invalid proposal id");
+        }
+        const changeProposal = await this.changeProposalCollection.findOne({ _id: proposalId });
+        if (!changeProposal) {
+            throw new Error("Proposal not found");
+        }
         const userModel = await this.userDataProvider.getUser(changeProposal.userId);
         switch (changeProposal.type) {
             case IdiomProposalType.CreateIdiom:
@@ -73,7 +78,7 @@ export class IdiomChangeProposalDataProvider {
         }
 
         if (idiomOperationResult.status == OperationStatus.Success) {
-            const res = await this.changeProposalCollection.deleteOne({ _id: new ObjectId(args.proposalId) });
+            const res = await this.changeProposalCollection.deleteOne({ _id: proposalId });
 
             // If the user's proposal was acceted 
             if (userModel && userModel.providers

@@ -9,6 +9,7 @@ import { Idiom } from "../pages/Idiom";
 import type { Route } from "./+types/idiom";
 import { getPublicUrl } from "../seo.server";
 import { getLanguagePath } from "../utilities/languagePath";
+import { safeJsonLd } from "../seo";
 
 export async function loader({ params, request }: Route.LoaderArgs) {
   const graphqlData = await graphqlRequest<GetIdiomQuery, GetIdiomQueryVariables>(
@@ -74,7 +75,7 @@ export const meta: Route.MetaFunction = ({ loaderData }) => {
     { name: "twitter:description", content: description },
     { name: "twitter:image", content: socialImageUrl.toString() },
     {
-      "script:ld+json": {
+      "script:ld+json": safeJsonLd({
         "@context": "https://schema.org",
         "@graph": [
           {
@@ -109,7 +110,7 @@ export const meta: Route.MetaFunction = ({ loaderData }) => {
             ],
           },
         ],
-      },
+      }),
     },
   ];
 };

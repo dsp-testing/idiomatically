@@ -8,7 +8,10 @@ import { ErrorLink } from "@apollo/client/link/error";
 
 export function createApolloClient(request?: Request) {
   const graphqlUrl = request
-    ? new URL("/graphql", request.url).toString()
+    ? new URL(
+        "/graphql",
+        process.env.SERVER_URL || "http://localhost:3000",
+      ).toString()
     : "/graphql";
   const headers = request?.headers.get("cookie")
     ? { cookie: request.headers.get("cookie")! }
